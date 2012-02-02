@@ -38,21 +38,25 @@ describe Heroku::Command::Mongo do
     uri = @mongo.send(:make_uri, 'mongodb://root:secret@hatch.local.mongohq.com/mydb')
     uri.host.should == 'hatch.mongohq.com'
   end
-  
+
   #cleanup mocks after use. The integration tests that follow require the real thing
   after do
     mocha_verify
     mocha_teardown
   end
-  
+
   describe "Integration test" do
     before do
       conn = Mongo::Connection.new
-      @from     = conn.db('heroku-mongo-sync-origin')
+      @from = conn.db('heroku-mongo-sync-origin')
       @from_uri = URI.parse('mongodb://localhost:27017/heroku-mongo-sync-origin')
-      @to       = conn.db('heroku-mongo-sync-dest')
-      @to_uri   = URI.parse('mongodb://localhost:27017/heroku-mongo-sync-dest')
+      @to = conn.db('heroku-mongo-sync-dest')
+      @to_uri = URI.parse('mongodb://localhost:27017/heroku-mongo-sync-dest')
       clear_collections
+
+      #not best practice, but we'll take it for now
+      @mongo.stubs(:origin).returns(@mongo.send(:make_connection, @from_uri))
+      @mongo.stubs(:dest).returns(@mongo.send(:make_connection, @to_uri))
     end
 
     after do
@@ -64,7 +68,7 @@ describe Heroku::Command::Mongo do
       col.insert(:id => 1, :name => 'first')
       col.insert(:id => 2, :name => 'second')
 
-      @mongo.send(:transfer, @from_uri, @to_uri)
+      @mongo.send(:transfer)
       @to.collection_names.should include('a')
       @to.collection('a').find_one(:id => 1)['name'].should == 'first'
     end
@@ -75,14 +79,29 @@ describe Heroku::Command::Mongo do
       col2 = @to.create_collection('a')
       col2.insert(:id => 2, :name => 'second')
 
-      @mongo.send(:transfer, @from_uri, @to_uri)
+      @mongo.send(:transfer)
       @to.collection('a').size.should == 1
+    end
+
+    it 'transfers a single collection' do
+      col1 = @from.create_collection('a')
+      col1.insert(:id => 1, :name => 'first')
+      col1.insert(:id => 2, :name => 'second')
+
+      col2 = @from.create_collection('b')
+      col2.insert(:id => 3, :name => 'third')
+      col2.insert(:id => 4, :name => 'fourth')
+
+      @mongo.send(:transfer_one, 'b')
+      @to.collection('a').size.should == 0
+      @to.collection('b').size.should == 2
+      @to.collection('b').find_one(:id => 3)['name'].should == 'third'
     end
   end
 
   def clear_collections
-    @from.collections.each { |c| c.drop unless sys_indexes?(c)}
-    @to.collections.each { |c| c.drop unless sys_indexes?(c)}
+    @from.collections.each { |c| c.drop unless sys_indexes?(c) }
+    @to.collections.each { |c| c.drop unless sys_indexes?(c) }
   end
 
   def sys_indexes?(c)
